@@ -10,4 +10,7 @@
   (test-extract-header-data)
   (test-create-header-data)
   (test-read-write-roundtrip)
+  (test-small-attention-model)
+  (test-empty-tensor-model)
+  (test-zero-rank-tensor)
   (format t "All tests passed.~%"))

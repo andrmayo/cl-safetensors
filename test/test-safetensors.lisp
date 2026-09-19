@@ -105,10 +105,8 @@
 		       (setf val (logior val (ash (aref file-bytes i) (* i 8))))))))
     (assert (= output-val file-val))))
 
-;; this should be fine for testing with small .safetensors files
-(defun test-read-write-roundtrip ()
-  (let* ((safetensor-path (get-paths))
-	 (mats-table (cl-safetensors::load-safetensors safetensor-path))
+(defun read-write-roundtrip (safetensor-path)
+  (let* ((mats-table (cl-safetensors::load-safetensors safetensor-path))
 	 (save-output (uiop:with-temporary-file (:stream stream
 							 :element-type '(unsigned-byte 8)
 							 :pathname path)
@@ -119,7 +117,29 @@
     (assert-equal-header-bytecounts save-output file-bytes)
     (assert (equalp save-output file-bytes))))
 
-;; TODO: test with empty tensors (with 1 dimension being 0), since safetensors allows this
+(defun test-read-write-roundtrip ()
+  (let ((safetensor-path (get-paths)))
+    (read-write-roundtrip safetensor-path)))
+
+(defun test-small-attention-model ()
+  (let ((attention-model-path
+          (asdf:system-relative-pathname
+	   :cl-safetensors "test/fixtures/small_attention_model.safetensors")))
+    (read-write-roundtrip attention-model-path)))
+
+(defun test-empty-tensor-model ()
+  (let ((empty-model-path
+          (asdf:system-relative-pathname
+	   :cl-safetensors "test/fixtures/empty_model.safetensors")))
+    (read-write-roundtrip empty-model-path)))
+
+(defun test-zero-rank-tensor ()
+  (let ((zero-rank-model-path
+	 (asdf:system-relative-pathname
+	  :cl-safetensors "test/fixtures/zero_rank.safetensors")))
+    (read-write-roundtrip zero-rank-model-path)))
+
+
 ;; TODO: test with 0-rank tensors
 ;; TODO: maybe validate that byte buffer is entirely indexed, without holes
 ;; (prevents polygot files)
