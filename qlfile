@@ -1,0 +1,5 @@
+# qlfile
+# version is pinned by qlfile.lock
+dist ultralisp https://dist.ultralisp.org/
+# ultralisp has the old tpapp/lla, not Lisp-Stat/lla
+ql lla
