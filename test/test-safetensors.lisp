@@ -129,18 +129,98 @@
 
 (defun test-empty-tensor-model ()
   (let ((empty-model-path
-          (asdf:system-relative-pathname
+	  (asdf:system-relative-pathname
 	   :cl-safetensors "test/fixtures/empty_model.safetensors")))
     (read-write-roundtrip empty-model-path)))
 
 (defun test-zero-rank-tensor ()
   (let ((zero-rank-model-path
-	 (asdf:system-relative-pathname
-	  :cl-safetensors "test/fixtures/zero_rank.safetensors")))
+	  (asdf:system-relative-pathname
+	   :cl-safetensors "test/fixtures/zero_rank.safetensors")))
     (read-write-roundtrip zero-rank-model-path)))
 
 
-;; TODO: test with 0-rank tensors
-;; TODO: maybe validate that byte buffer is entirely indexed, without holes
-;; (prevents polygot files)
-;; TODO: more importantly, validate that mgl-mat objects actually have the right dimensions
+(defun validation-helper (path)
+  (multiple-value-bind (mmap-ptr fd mmap-size) (mmap:mmap path)
+    (check-type mmap-size (and unsigned-byte fixnum))
+    (unwind-protect
+	 (with-open-file (stream path :element-type '(unsigned-byte 8))
+	   (let* ((header-size (cl-safetensors::read-u64-to-u32-le stream))
+		  (header-bytes
+		    (make-array header-size :element-type '(unsigned-byte 8))))
+	     (read-sequence header-bytes stream)
+	     (let ((header-data (cl-safetensors::extract-header-data header-bytes)))
+	       (values header-data mmap-size header-size))))
+      (when mmap-ptr
+	(mmap:munmap mmap-ptr fd mmap-size)))))
+
+
+(defun catch-trailing-bytes ()
+  (let* ((trailing-byte-path
+	   (asdf:system-relative-pathname
+	    :cl-safetensors
+	    "test/fixtures/trailing_bytes.safetensors"))
+	 (error-message
+	   (with-output-to-string (output)
+	     (let ((*error-output* output))
+	       (multiple-value-bind (header-data mmap-size header-size)
+		   (validation-helper trailing-byte-path)
+		 (assert
+		  (cl-safetensors::safetensors-invalid-p header-data mmap-size header-size)))))))
+    ;; effectively checks that there's just one error message
+    (assert (= 1 (count #\Newline error-message)))
+    ;; effectively checks that it's the right error message
+    (assert (uiop:string-prefix-p "Tensor offset"))))
+
+(defun catch-overflow-bytes ()
+  (let* ((overflow-byte-path
+	   (asdf:system-relative-pathname
+	    :cl-safetensors
+	    "test/fixtures/overflow_bytes.safetensors"))
+	 (error-message
+	   (with-output-to-string (output)
+	     (let ((*error-output* output))
+	       (multiple-value-bind (header-data mmap-size header-size)
+		   (validation-helper overflow-byte-path)
+		 (assert
+		  (cl-safetensors::safetensors-invalid-p header-data mmap-size header-size)))))))
+    ;; effectively checks that there's just one error message
+    (assert (= 1 (count #\Newline error-message)))
+    ;; effectively checks that it's the right error message
+    (assert (uiop:string-prefix-p "Actual size of tensors" error-message))))
+
+(defun catch-overlap-bytes ()
+  (let* ((overlap-byte-path
+	   (asdf:system-relative-pathname
+	    :cl-safetensors
+	    "test/fixtures/overlap_bytes.safetensors"))
+	 (error-message
+	   (with-output-to-string (output)
+	     (let ((*error-output* output))
+	       (multiple-value-bind (header-data mmap-size header-size)
+		   (validation-helper overlap-byte-path)
+		 (assert
+		  (cl-safetensors::safetensors-invalid-p header-data mmap-size header-size)))))))
+    (assert (= 1 (count #\Newline error-message)))
+    (assert (uiop:string-prefix-p "Safetensors file has overlapping byte offsets" error-message))))
+
+(defun catch-gap-bytes ()
+  (let* ((gap-byte-path
+	   (asdf:system-relative-pathname
+	    :cl-safetensors
+	    "test/fixtures/gap_bytes.safetensors"))
+	 (error-message
+	   (with-output-to-string (output)
+	     (let ((*error-output* output))
+	       (multiple-value-bind (header-data mmap-size header-size)
+		   (validation-helper gap-byte-path)
+		 (assert
+		  (cl-safetensors::safetensors-invalid-p header-data mmap-size header-size)))))))
+    (assert (= 1 (count #\Newline error-message)))
+    (assert (uiop:string-prefix-p "Safetensors file has a gap in byte offsets" error-message))))
+
+(defun test-safetensors-invalid-p ()
+  (catch-trailing-bytes)
+  (catch-overflow-bytes)
+  (catch-overlap-bytes)
+  (catch-gap-bytes))

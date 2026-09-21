@@ -13,4 +13,5 @@
   (test-small-attention-model)
   (test-empty-tensor-model)
   (test-zero-rank-tensor)
+  (test-safetensors-invalid-p)
   (format t "All tests passed.~%"))

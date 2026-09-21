@@ -8,6 +8,8 @@
 (in-package :cl-safetensors)
 
 
+;;; Reading and writing 8-byte integer value at start of file
+
 (declaim (ftype (function (stream) (unsigned-byte 32)) read-u64-to-u32-le)
          (inline read-u64-to-u32-le))
 
@@ -37,6 +39,7 @@
     (write-byte (ldb (byte 8 (* i 8)) val) write-stream))
   (values))
 
+;;; Handling header data
 
 (declaim (ftype (function ((vector (unsigned-byte 8))) hash-table) extract-header-data)
          (inline extract-header-data))
@@ -154,6 +157,69 @@
          (values header-data padded-header-arr))))))
 
 
+;;; Validating contents to avoid polyglot exploits
+
+(declaim (ftype (function (hash-table fixnum (unsigned-byte 32)) boolean))
+	 (inline trailing-bytes-p))
+
+(defun trailing-or-overflow-bytes-p (header-data file-size header-size)
+  (let ((tensors-size (the fixnum (- file-size header-size 8)))
+	(max-offset-end 0))
+    (alexandria:maphash-values
+     (lambda (meta-data)
+       (let* ((offsets (gethash "data_offsets" meta-data))
+	      (offset-end (aref offsets 1)))
+	 (when (> offset-end tensors-size)
+	   (format *error-output* "Tensor offset ~a exceeds size of tensors in file.~%"
+		   (gethash "data_offsets" meta-data))
+	   (return-from trailing-or-overflow-bytes-p t))
+	 (setf max-offset-end (max offset-end max-offset-end))))
+     header-data)
+    (when (/= max-offset-end tensors-size)
+      (format *error-output* "Actual size of tensors (~a) exceeds last offset value (~a).~%"
+	      tensors-size max-offset-end)
+      (return-from trailing-or-overflow-bytes-p t))
+    nil))
+
+(declaim (ftype (function (hash-table) boolean) trailing-byte-p)
+	 (inline overlap-or-gap-in-bytes-p))
+
+(defun overlap-or-gap-in-bytes-p (header-data)
+  (let ((offset-ranges (make-array (hash-table-count header-data) :adjustable t :fill-pointer 0)))
+    (alexandria:maphash-values
+     (lambda (meta-data)
+       (vector-push-extend
+	(gethash "data_offsets" meta-data) offset-ranges))
+     header-data)
+    (setf offset-ranges (sort offset-ranges #'< :key #'car))
+    (loop for i from 1 below (length offset-ranges)
+	  do (let ((last-offset-end (aref (aref offset-ranges (1- i)) 1))
+		   (cur-offset-start (aref (aref offset-ranges i) 0)))
+	       (when (< cur-offset-start last-offset-end)
+		 (format *error-output*
+			 "Safetensors file has overlapping byte offsets for offsets ~a and ~a.~%"
+			 (aref offset-ranges (1- i)) (aref offset-ranges i))
+		 (return t))
+	       (when (> cur-offset-start last-offset-end)
+		 (format *error-output*
+			 "Safetensors file has a gap in byte offsets for offsets ~a and ~a.~%"
+			 (aref offset-ranges (1- i)) (aref offset-ranges i))
+		 (return t)))
+	     finally (return nil))))
+
+
+(declaim (ftype (function (hash-table (and unsigned-byte fixnum) (unsigned-byte 32)) boolean)
+		safetensors-invalid-p))
+
+(defun safetensors-invalid-p (header-data mmap-size header-size)
+  "Runs data validation functions with `path'."
+  (cond
+    ((trailing-or-overflow-bytes-p header-data mmap-size header-size) t)
+    ((overlap-or-gap-in-bytes-p header-data) t)
+    (t nil)))
+
+;;; Reading and writing .safetensors files
+
 ;; currently supports float (fl32) and double (fl64), since mgl supports these types
 ;; if this changes, add more types here
 (declaim (ftype (function (string) (or keyword null)) check-dtype))
@@ -167,7 +233,8 @@
 
 (declaim (ftype (function
                  (hash-table (unsigned-byte 32) cffi:foreign-pointer boolean)
-                 hash-table) handle-tensor-data))
+                 hash-table)
+		handle-tensor-data))
 
 ;; helper function for processing safetensor
 
@@ -223,26 +290,29 @@ and `dtype`"
 (defun load-safetensors (path &key (cuda-p nil))
   "Parses PATH and returns a hash table mapping tensor names to mgl-mat:mat objects."
   (multiple-value-bind (mmap-ptr fd mmap-size) (mmap:mmap path)
-		       (unwind-protect
-			   (with-open-file (stream path :element-type '(unsigned-byte 8))
-					   (let*  ((header-size (read-u64-to-u32-le stream))
-						   (header-bytes
-						    (make-array
-						     header-size
-						     :element-type '(unsigned-byte 8))))
-					     (read-sequence header-bytes stream)
-					     (let ((meta-data (extract-header-data header-bytes))
-						   ;; 8 bytes for unsigned 64 bit integer
-						   (data-base (+ 8 header-size)))
-					       (handle-tensor-data
-						meta-data
-						data-base
-						mmap-ptr
-						cuda-p)))) ; return value
-			 ;; Free mmap buffer after copying floats into mgl-mat memory
-			 (when mmap-ptr
-			   (mmap:munmap mmap-ptr fd mmap-size)))))
-
+    (check-type mmap-size (and unsigned-byte fixnum))
+    (unwind-protect
+	 (with-open-file (stream path :element-type '(unsigned-byte 8))
+	   (let*  ((header-size (read-u64-to-u32-le stream))
+		   (header-bytes
+		     (make-array
+		      header-size
+		      :element-type '(unsigned-byte 8))))
+	     (read-sequence header-bytes stream)
+	     (let ((meta-data (extract-header-data header-bytes))
+		   ;; 8 bytes for unsigned 64 bit integer
+		   (data-base (+ 8 header-size)))
+	       (when (safetensors-invalid-p
+		      meta-data mmap-size header-size)
+		 (error "Invalid data read from ~a." path))
+	       (handle-tensor-data
+		meta-data
+		data-base
+		mmap-ptr
+		cuda-p)))) ; return value
+      ;; Free mmap buffer after copying floats into mgl-mat memory
+      (when mmap-ptr
+	(mmap:munmap mmap-ptr fd mmap-size)))))
 
 ;; loosely modelled after mgl/src/core.lisp SAVE-STATE, but without use of generics.
 ;; Ultimately a write method that inherits from the generic mgl-core:write-state*
@@ -270,10 +340,10 @@ and `dtype`"
   (when ensure
     (ensure-directories-exist filename))
   (with-open-file (stream filename :direction :output
-                          :element-type '(unsigned-byte 8)
-                          :if-does-not-exist :create
-                          :if-exists if-exists)
-		  (write-safetensors mats-table stream)))
+				   :element-type '(unsigned-byte 8)
+				   :if-does-not-exist :create
+				   :if-exists if-exists)
+    (write-safetensors mats-table stream)))
 
 ;; TODO: perhaps add quanitization options to downsize (and, for completeness' sake)
 ;; upsize floating point bits.
