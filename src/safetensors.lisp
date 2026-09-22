@@ -341,7 +341,7 @@ and `dtype`"
 (defun save-safetensors (filename mats-table &key (if-exists :error) (ensure t))
   "Save hash-table MATS-TABLE of names to mat objects to FILENAME. If ENSURE,
   ENSURE-DIRECTORIES-EXIST is called on FILENAME. IF-EXISTS is passed
-  on to OPEN. Return MATS-TABLE."
+  on to WITH-OPEN-FILE. Return MATS-TABLE."
   (when ensure
     (ensure-directories-exist filename))
   (with-open-file (stream filename :direction :output

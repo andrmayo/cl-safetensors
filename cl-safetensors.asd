@@ -4,12 +4,15 @@
   :license "MIT"
   :version "0.1.0"
   :name "CL-SAFETENSORS"
-  :author "Andrew Mayo <acmayo399@gmail.com>"
+  :author "Andrew C. Mayo <acmayo399@gmail.com>"
   :mailto "acmayo399@gmail.com"
   :homepage "https://github.com/andrmayo/cl-safetensors"
   :bug-tracker "https://github.com/andrmayo/cl-safetensors/issues"
   :source-control (:git "https://github.com/andrmayo/cl-safetensors.git")
-  :description ""
+  :description "Utilities for reading and writing .safetensors files."
+  :long-description
+  #.(uiop:read-file-string
+      (uiop:subpathname *load-pathname* "README.md"))
   :depends-on (#:alexandria ; utilities library
 	       #:babel ; UTF-8 byte-to-string
 	       #:cffi ; C foreign pointers
