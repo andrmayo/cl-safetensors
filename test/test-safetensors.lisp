@@ -170,7 +170,7 @@
     ;; effectively checks that there's just one error message
     (assert (= 1 (count #\Newline error-message)))
     ;; effectively checks that it's the right error message
-    (assert (uiop:string-prefix-p "Tensor offset"))))
+    (assert (uiop:string-prefix-p "Tensor offset" error-message))))
 
 (defun catch-overflow-bytes ()
   (let* ((overflow-byte-path
