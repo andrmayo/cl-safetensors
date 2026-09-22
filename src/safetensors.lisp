@@ -191,7 +191,11 @@
        (vector-push-extend
 	(gethash "data_offsets" meta-data) offset-ranges))
      header-data)
-    (setf offset-ranges (sort offset-ranges #'< :key (lambda (arr) (aref arr 0))))
+    (setf offset-ranges (sort offset-ranges
+			      (lambda (arr1 arr2)
+				(if (= (aref arr1 0) (aref arr2 0))
+				    (<= (aref arr1 1) (aref arr2 1))
+				    (<= (aref arr1 0) (aref arr2 0))))))
     (loop for i from 1 below (length offset-ranges)
 	  do (let ((last-offset-end (aref (aref offset-ranges (1- i)) 1))
 		   (cur-offset-start (aref (aref offset-ranges i) 0)))
