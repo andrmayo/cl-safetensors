@@ -224,3 +224,74 @@
   (catch-overflow-bytes)
   (catch-overlap-bytes)
   (catch-gap-bytes))
+
+;;; Checking that mat objects read from test/fixtures/example_mlp.safetensors
+;;; behave correctly as mgl-mat:mat objects, by running a forward pass through
+;;; the MLP (nn.Linear -> ReLU -> nn.Linear -> ReLU -> nn.Linear -> Sigmoid)
+;;; using mgl-mat operations (GEMM!, MREF) on the mat objects and comparing
+;;; against reference output computed by loading the same weights into an
+;;; equivalent PyTorch model and running it on the same input.
+
+(defparameter +mlp-test-input+
+  #(1.92691529d0 1.48728406d0 0.900717199d0 -2.10552096d0 0.678418458d0
+    -1.23454487d0 -0.0430674776d0 -1.60466695d0 -0.752135277d0 1.64872301d0
+    -0.392478645d0 -1.40360713d0 -0.727881312d0 -0.559430182d0 -0.768838882d0
+    0.76244539d0 1.64231694d0 -0.159597471d0 -0.497397542d0 0.439589262d0
+    -0.758131146d0 1.07831764d0 0.800800562d0 1.68062055d0 1.27912438d0
+    1.29642284d0 0.61046648d0 1.33473778d0 -0.23162432d0 0.041759491d0
+    -0.251575291d0 0.859858513d0 -1.38467371d0 -0.871236145d0 -0.223365918d0
+    1.71736145d0 0.31888032d0 -0.424518973d0 0.305720925d0 -0.774592519d0
+    -1.55757248d0 0.995636106d0 -0.879785836d0 -0.601142049d0 -1.27415121d0
+    2.12278509d0 -1.23465312d0 -0.487913877d0 -0.913823009d0 -0.658137262d0
+    0.0780238733d0 0.525808752d0 -0.48799172d0 1.19136906d0 -0.81400764d0
+    -0.735992789d0 -1.40324783d0 0.0360036679d0 -0.0634772703d0 0.675614893d0
+    -0.0978068933d0 1.844594d0 -1.18453741d0 1.38354933d0))
+
+(defparameter +mlp-test-expected-output+
+  #(0.498995781d0 0.520689189d0 0.524289727d0 0.526735544d0 0.574269414d0
+    0.51565814d0 0.532075405d0 0.515236318d0))
+
+(defun mlp-linear (x weight bias)
+  "Applies an affine layer X @ WEIGHT^T + BIAS, where X is a 1xIN mat, WEIGHT
+  is an OUTxIN mat, and BIAS is a length-OUT mat, returning a 1xOUT mat."
+  (let* ((out (first (mgl-mat:mat-dimensions weight)))
+	 (result (mgl-mat:make-mat (list 1 out) :ctype :float)))
+    (mgl-mat:gemm! 1.0 x weight 0.0 result :transpose-b? t)
+    (dotimes (i out)
+      (incf (mgl-mat:mref result 0 i) (mgl-mat:mref bias i)))
+    result))
+
+(defun mlp-relu! (mat)
+  (dotimes (i (mgl-mat:mat-size mat))
+    (when (< (mgl-mat:row-major-mref mat i) 0.0)
+      (setf (mgl-mat:row-major-mref mat i) 0.0)))
+  mat)
+
+(defun mlp-sigmoid! (mat)
+  (dotimes (i (mgl-mat:mat-size mat))
+    (setf (mgl-mat:row-major-mref mat i)
+	  (/ 1.0 (+ 1.0 (exp (- (mgl-mat:row-major-mref mat i)))))))
+  mat)
+
+(defun test-mat-forward-pass ()
+  "Loads test/fixtures/example_mlp.safetensors and checks that the resulting
+  mgl-mat:mat objects behave correctly under real mgl-mat operations by
+  running a forward pass and comparing against PyTorch's output for the same
+  weights and input."
+  (let* ((mats-table
+	  (cl-safetensors:load-safetensors
+	   (asdf:system-relative-pathname
+	    :cl-safetensors "test/fixtures/example_mlp.safetensors")))
+	 (x (mgl-mat:make-mat (list 1 64) :ctype :float)))
+    (dotimes (i 64)
+      (setf (mgl-mat:mref x 0 i) (coerce (aref +mlp-test-input+ i) 'single-float)))
+    (let* ((h1 (mlp-relu! (mlp-linear x (gethash "0.weight" mats-table)
+					  (gethash "0.bias" mats-table))))
+	   (h2 (mlp-relu! (mlp-linear h1 (gethash "2.weight" mats-table)
+					   (gethash "2.bias" mats-table))))
+	   (y (mlp-sigmoid! (mlp-linear h2 (gethash "4.weight" mats-table)
+					     (gethash "4.bias" mats-table)))))
+      (dotimes (i 8)
+	(assert (< (abs (- (mgl-mat:mref y 0 i)
+			    (coerce (aref +mlp-test-expected-output+ i) 'single-float)))
+		   1d-4))))))

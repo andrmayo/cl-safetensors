@@ -14,4 +14,5 @@
   (test-empty-tensor-model)
   (test-zero-rank-tensor)
   (test-safetensors-invalid-p)
+  (test-mat-forward-pass)
   (format t "All tests passed.~%"))
