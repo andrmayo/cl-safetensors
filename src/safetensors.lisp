@@ -161,7 +161,7 @@
 ;;; Validating contents to avoid polyglot exploits
 
 (declaim (ftype (function (hash-table fixnum (unsigned-byte 32)) boolean))
-	 (inline trailing-bytes-p))
+	 (inline trailing-or-overflow-bytes-p))
 
 (defun trailing-or-overflow-bytes-p (header-data file-size header-size)
   (let ((tensors-size (the fixnum (- file-size header-size 8)))
@@ -182,7 +182,7 @@
       (return-from trailing-or-overflow-bytes-p t))
     nil))
 
-(declaim (ftype (function (hash-table) boolean) trailing-byte-p)
+(declaim (ftype (function (hash-table) boolean) overlap-or-gap-in-byte-p)
 	 (inline overlap-or-gap-in-bytes-p))
 
 (defun overlap-or-gap-in-bytes-p (header-data)
@@ -289,7 +289,7 @@ and `dtype`"
     tensor-map))
 
 (declaim (ftype (function ((or string pathname) &key (:cuda-p boolean)) hash-table)
-                load-safetensors-mats))
+                load-safetensors))
 
 ;; returns hash-table that maps names to mgl-mat matrices
 (defun load-safetensors (path &key (cuda-p nil))
