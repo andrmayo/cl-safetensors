@@ -4,6 +4,7 @@
 ;;;; Hash-table deserialization target has format {<tensor_name>: mgl-mat:mat},
 ;;;; where <tensor_name> is read from .safetensors file, and mgl-mat:mat object is created by
 ;;;; reading mmap'd tensors using header offsets and constructing mgl-mat:mat objects from them.
+;;;; API functions are LOAD-SAFETENSORS, SAVE-SAFETENSORS, and WRITE-SAFETENSORS.
 
 (in-package :cl-safetensors)
 

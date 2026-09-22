@@ -1,4 +1,3 @@
 (defpackage #:cl-safetensors
   (:use #:cl)
-  ;; (:export #:<file>)
-  )
+  (:export #:load-safetensors #:save-safetensors #:write-safetensors))
